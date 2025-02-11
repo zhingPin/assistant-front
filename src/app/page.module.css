@@ -1,8 +1,13 @@
 .main {
-  display: flex;
-  flex-direction: column;
+  /* display: flex;
+  flex-direction: column; */
   justify-content: space-between;
   align-items: center;
   padding: 1rem 3rem;
   min-height: 100vh;
+}
+
+.code {
+  font-weight: 700;
+  font-family: var(--font-mono);
 }
