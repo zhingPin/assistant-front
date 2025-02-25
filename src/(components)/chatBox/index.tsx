@@ -1,9 +1,11 @@
 "use client";
+
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { dracula } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { fetchMessages, sendMessageToAPI } from "./lib/api/chat";
 import styles from "./index.module.css";
 
 interface Message {
@@ -20,37 +22,26 @@ const ChatComponent = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-
-  // ✅ Use `useRef` for better performance (Avoids unnecessary re-renders)
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    async function fetchMessages() {
-      try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_PROJECT_NEO_BASE_URL}/api/v1/thread/${THREAD_ID}/messages`
-        );
-        const text = await res.text();
-        const data = JSON.parse(text);
-        if (data.status === "success") {
-          setMessages(data.data.messages);
-        } else {
-          console.error("Failed to fetch messages:", data);
-        }
-      } catch (error) {
-        console.error("Error fetching messages:", error);
-      } finally {
-        setLoading(false);
-      }
+    async function loadMessages() {
+      setLoading(true);
+      const data = await fetchMessages(THREAD_ID);
+      setMessages(data);
+      setLoading(false);
     }
 
-    fetchMessages();
+    loadMessages();
   }, []);
 
   const sendMessage = useCallback(async () => {
     if (!inputRef.current || sending) return;
     const inputMessage = inputRef.current.value.trim();
     if (!inputMessage) return;
+
+    console.log("Sending message:", inputMessage);
 
     const newMessage: Message = {
       id: crypto.randomUUID(),
@@ -59,40 +50,27 @@ const ChatComponent = () => {
     };
 
     setMessages((prev) => [...prev, newMessage]);
-    inputRef.current.value = ""; // ✅ Clear input without triggering re-renders
+    inputRef.current.value = "";
     setSending(true);
 
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_PROJECT_NEO_BASE_URL}/api/v1/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: inputMessage,
-            threadId: THREAD_ID,
-            assistantId: ASSISTANT_ID,
-          }),
-        }
-      );
-
-      const data = await response.json();
-      if (data.response) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            sender: "assistant",
-            content: data.response,
-          },
-        ]);
-      }
-    } catch (error) {
-      console.error("Error sending message:", error);
-    } finally {
-      setSending(false);
+    const response = await sendMessageToAPI(
+      inputMessage,
+      THREAD_ID,
+      ASSISTANT_ID
+    );
+    if (response) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), sender: "assistant", content: response },
+      ]);
     }
+
+    setSending(false);
   }, [sending]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   return (
     <div>
@@ -103,18 +81,21 @@ const ChatComponent = () => {
         ) : messages.length === 0 ? (
           <p>No messages found.</p>
         ) : (
-          messages.map((msg) => (
+          messages.map((msg, index) => (
             <div
-              key={msg.id}
               className={`${styles.message} ${
                 msg.sender === "assistant" ? styles.ai : styles.user
               }`}
+              key={msg.id || index}
+              ref={index === messages.length - 1 ? messagesEndRef : null}
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
                   code({ node, className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || "");
+                    const match = /language-(\w+)/.exec(
+                      className?.toString() || ""
+                    );
                     return match ? (
                       <SyntaxHighlighter language={match[1]} style={dracula}>
                         {String(children).replace(/\n$/, "")}
@@ -135,7 +116,6 @@ const ChatComponent = () => {
       </div>
 
       <div className={styles.textAreaContainer}>
-        {/* ✅ Use ref instead of state for instant input */}
         <textarea
           ref={inputRef}
           className={styles.textArea}
